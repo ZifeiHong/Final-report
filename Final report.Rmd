@@ -1,0 +1,144 @@
+---
+title: "Analysis of Tesla Stock Data "
+author: "Group 7"
+date: "12/12/2023"
+output:
+  word_document: default
+  pdf_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+## Introduction
+
+This report presents a detailed analysis of Tesla's stock data. The focus is to understand the trends and patterns in the stock prices, particularly looking at volume traded over time, and to forecast future movements.
+
+## Data Loading and Preprocessing
+
+The Tesla stock data was loaded and preprocessed, focusing on formatting the dates and converting numeric values for in-depth analysis. The following code was used for this purpose:
+
+```{r, echo=FALSE, fig.height=3}
+# Loading the libraries
+library(ggplot2)
+library(forecast)
+library(tseries)
+library(tseries)
+library(TSA)
+library(readxl)
+library(xts)
+
+# Loading the data
+df <- read.csv("/Users/hongzifei/Downloads/TeslaStockData.csv", header = TRUE)
+
+df$Date <- as.Date(df$Date)   # Converting 'Date' to Date format
+
+
+df <- df[complete.cases(df$Date), ]
+df_xts <- xts(df[, -1], order.by = df$Date)  # Converting to xts time series
+# Assuming numeric columns are from the 2nd column onwards
+num_cols <- 2:6
+df[, num_cols] <- lapply(df[, num_cols], function(x) as.numeric(gsub("[\\$,]", "", x)))
+
+
+# Converting to xts time series with numeric columns
+df_xts <- xts(df[, num_cols], order.by = df$Date)
+
+# Obtaining monthly average
+df_monthly <- as.data.frame(apply.monthly(df_xts, colMeans))
+df_monthly$Date <- index(df_monthly)  # Add the 'Date' column back
+
+head(df_monthly)  # Displaying the first few rows
+summary(df_monthly)  # Summary statistics
+```
+
+##Exploratory Data Analysis
+In this phase, we explored the data, focusing on the Volume traded over time.
+```{r, echo=FALSE}
+# Boxplots for each variable - possible indicator for extreme values/ peaks in volume
+par(mfrow=c(2,2))
+
+boxplot(df_monthly$Volume, main="Boxplot - Volume")
+
+#time series plots
+
+ggplot(df_monthly, aes(x = Date, y = Volume)) + geom_line() + labs(title = "Time Series Plot - Monthly Average Volume")
+```
+
+##Time Series Decomposition
+We decomposed the time series data to analyze the trend, seasonality, and noise components.
+```{r, echo=FALSE, fig.height=3}
+# Decomposition of the time series plots (additive)
+decomp_additive <- decompose(ts(df_monthly$Volume, frequency = 12), type = "additive")
+plot(decomp_additive)
+
+# Decomposition of the time series plot (multiplicative)
+
+decomp_multiplicative <- decompose(ts(df_monthly$Volume, frequency = 12), type = "multiplicative")
+plot(decomp_multiplicative)
+```
+
+##Autocorrelation Analysis
+Autocorrelation and partial autocorrelation plots were used to understand the correlations in the data.
+```{r, echo=FALSE, fig.height=3}
+# Autocorrelation plots (ACF)
+
+acf(df_monthly$Volume, lag.max=40)
+
+# Partial autocorrelation plots (PACF)
+
+pacf(df_monthly$Volume, lag.max=40)
+```
+
+##Stationarity Testing and Transformation
+Stationarity of the data was tested to ensure the validity of time series models.
+```{r, echo=FALSE, fig.height=3}
+# ADF test and Log Transformations
+## Data Splitting
+
+# Assuming your data is already sorted by date
+cutoff_index <- round(0.7 * nrow(df_monthly))
+train_data <- df_monthly[1:cutoff_index, ]
+test_data <- df_monthly[(cutoff_index + 1):nrow(df_monthly), ]
+
+# ADF test on original and transformed data
+adf.test(train_data$Volume)
+plot(log(df_monthly$Volume), type = "l")
+plot(diff(log(df_monthly$Volume)), type = "l")
+adf.test(log(df_monthly$Volume))
+adf.test(diff(log(df_monthly$Volume)))
+
+```
+
+##SARIMA Model Fitting and Forecasting
+We fitted a SARIMA model to the data and made future forecasts.
+```{r, echo=FALSE, fig.height=3}
+
+# Fitting the SARIMA model
+arima_model_volume <- auto.arima(train_data$Volume)
+sarima_model_volume <- Arima(train_data$Volume, order = c(1, 0, 0), seasonal = list(order = c(1, 1, 1), period = 12))
+print(summary(sarima_model_volume))
+
+# Forecasting
+sarima_forecast <- forecast(sarima_model_volume, h = length(test_data$Volume))
+
+# Creating the sequence for the forecasted values
+forecast_sequence <- seq(from = length(train_data$Volume) + 1, 
+                         to = length(train_data$Volume) + length(test_data$Volume))
+
+# Plotting the original data, test data, and forecast
+plot(df_monthly$Volume, type = "l", col = "blue", lwd = 2, ylab = "Volume", xlab = "Time", main = "SARIMA Forecast vs. Original Data")
+lines(forecast_sequence, test_data$Volume, col = "green", lwd = 2)
+lines(forecast_sequence, sarima_forecast$mean, col = "red", lwd = 2)
+legend("topright", legend = c("Original Data", "Test Data", "Forecast"), col = c("blue", "green", "red"), lty = 1:2, cex = 0.8)
+
+```
+
+# Ljung-Box Test
+```{r, echo=FALSE}
+sarima_residuals <- residuals(sarima_model_volume)
+ljung_box_test <- Box.test(sarima_residuals, lag = 40, type = "Ljung-Box")
+print(ljung_box_test)
+```
+
+
